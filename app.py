@@ -2,6 +2,7 @@ import streamlit as st
 from models import Address, Coordinates, Property, SlopeData, EnvironmentalCheck, FeasibilityReport
 from geo_processing import geocode_address, extract_property, calculate_slope, check_environmental_hazards, create_map
 from gemini_analysis import analyze_location, analyze_slope, generate_feasibility_report, chat_with_report
+import numpy as np
 
 # Define GeoJSON files for map display
 GEOJSON_FILES = {
@@ -17,12 +18,16 @@ GEOJSON_FILES = {
 def perform_analysis(street: str, zip_code: str) -> None:
     """Perform the full property analysis and store results in session state."""
     # Step 1: Geocode address
+    address_str = f"{street}, Mercer Island, WA"
+    if zip_code:
+        address_str += f", {zip_code}"
     address = Address(street=street, zip_code=zip_code if zip_code else None)
     coordinates = geocode_address(address)
     if not coordinates:
         st.error("Failed to geocode address. Please check the input and try again.")
         return
     st.session_state.coordinates = coordinates
+    st.session_state.address = address_str
     st.success(f"Geocoded Address: ({coordinates.latitude}, {coordinates.longitude})")
 
     # Step 2: Extract property data
@@ -47,13 +52,48 @@ def perform_analysis(street: str, zip_code: str) -> None:
     st.session_state.environmental_check = environmental_check
 
     # Step 5: Gemini location analysis
-    location_analysis = analyze_location(environmental_check)
+    with st.spinner("Performing location analysis..."):
+        location_analysis = analyze_location(
+            latitude=coordinates.latitude,
+            longitude=coordinates.longitude,
+            address=address_str
+        )
+    st.session_state.location_analysis = location_analysis
 
     # Step 6: Gemini slope analysis
-    slope_analysis = analyze_slope(slope_data)
+    with st.spinner("Performing slope analysis..."):
+        # SlopeData has average_slope and max_slope in degrees
+        avg_slope = slope_data.average_slope if hasattr(slope_data, 'average_slope') else 0
+        # Convert slope percentage to elevation difference and distance
+        # Assume a hypothetical distance of 10 meters if unknown
+        dist = 10.0  # Default distance in meters
+        # slope (%) = (elevation_diff / distance) * 100
+        # elevation_diff (meters) = (slope / 100) * distance
+        elev_diff_m = (avg_slope / 100) * dist
+        # Convert elevation difference to feet (1 meter = 3.28084 feet)
+        elev_diff_ft = elev_diff_m * 3.28084
+        slope_analysis = analyze_slope(
+            slope=avg_slope,
+            elevation_diff=elev_diff_ft,
+            distance=dist
+        )
+    st.session_state.slope_analysis = slope_analysis
 
     # Step 7: Gemini feasibility report
-    feasibility_report = generate_feasibility_report(location_analysis, slope_analysis)
+    with st.spinner("Generating feasibility report..."):
+        environmental_hazards = {
+            "erosion": environmental_check.erosion,
+            "potential_slide": environmental_check.potential_slide,
+            "seismic": environmental_check.seismic,
+            "steep_slope": environmental_check.steep_slope,
+            "watercourse": environmental_check.watercourse
+        }
+        feasibility_report = generate_feasibility_report(
+            address=address_str,
+            slope_analysis=slope_analysis,
+            location_analysis=location_analysis,
+            environmental_hazards=environmental_hazards
+        )
     st.session_state.feasibility_report = feasibility_report
 
 def display_report():
@@ -67,18 +107,21 @@ def display_report():
             create_map(st.session_state.coordinates, st.session_state.property, GEOJSON_FILES)
 
             st.subheader("Feasibility Report")
-            st.write("**Location Analysis Summary:**", report.location_analysis.summary)
-            st.write("**Location Recommendations:**")
-            for rec in report.location_analysis.recommendations:
-                st.write(f"- {rec}")
-            st.write("**Slope Analysis Summary:**", report.slope_analysis.summary)
-            st.write("**Slope Recommendations:**")
-            for rec in report.slope_analysis.recommendations:
-                st.write(f"- {rec}")
-            st.write("**Overall Feasibility:**", report.overall_feasibility)
-            st.write("**Detailed Recommendations:**")
-            for rec in report.detailed_recommendations:
-                st.write(f"- {rec}")
+            st.write("**Location Analysis Summary:**", report.location_analysis.summary if report.location_analysis else "Analysis unavailable")
+            if report.location_analysis and hasattr(report.location_analysis, 'recommendations'):
+                st.write("**Location Recommendations:**")
+                for rec in report.location_analysis.recommendations:
+                    st.write(f"- {rec}")
+            st.write("**Slope Analysis Summary:**", report.slope_analysis.summary if report.slope_analysis else "Analysis unavailable")
+            if report.slope_analysis and hasattr(report.slope_analysis, 'recommendations'):
+                st.write("**Slope Recommendations:**")
+                for rec in report.slope_analysis.recommendations:
+                    st.write(f"- {rec}")
+            st.write("**Overall Feasibility:**", report.overall_feasibility if hasattr(report, 'overall_feasibility') else "N/A")
+            if hasattr(report, 'detailed_recommendations'):
+                st.write("**Detailed Recommendations:**")
+                for rec in report.detailed_recommendations:
+                    st.write(f"- {rec}")
         else:
             st.warning("Feasibility report is incomplete. Please re-run the analysis.")
     else:
@@ -90,12 +133,18 @@ def main():
     # Initialize session state for analysis results and chat history
     if "coordinates" not in st.session_state:
         st.session_state.coordinates = None
+    if "address" not in st.session_state:
+        st.session_state.address = ""
     if "property" not in st.session_state:
         st.session_state.property = None
     if "slope_data" not in st.session_state:
         st.session_state.slope_data = None
     if "environmental_check" not in st.session_state:
         st.session_state.environmental_check = None
+    if "location_analysis" not in st.session_state:
+        st.session_state.location_analysis = None
+    if "slope_analysis" not in st.session_state:
+        st.session_state.slope_analysis = None
     if "feasibility_report" not in st.session_state:
         st.session_state.feasibility_report = None
     if "chat_history" not in st.session_state:
@@ -145,7 +194,7 @@ def main():
                 user_question = st.session_state.chat_input
                 if user_question and user_question not in [q for q, _ in st.session_state.chat_history]:
                     # Pass the chat history to chat_with_report
-                    answer = chat_with_report(st.session_state.feasibility_report, user_question, st.session_state.chat_history)
+                    answer = chat_with_report(st.session_state.feasibility_report, user_question)
                     st.session_state.chat_history.append((user_question, answer))
                     # Clear the input
                     st.session_state.chat_input = ""
