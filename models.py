@@ -54,3 +54,4 @@ class FeasibilityReport(BaseModel):
     slope_analysis: SlopeAnalysis = Field(..., description="Slope analysis results")
     overall_feasibility: str = Field(..., description="Overall feasibility assessment")
     detailed_recommendations: List[str] = Field(..., description="Detailed recommendations for development")
+    hazard_layers: List[str] = Field(..., description="List of hazard layer statuses (e.g., 'Erosion Hazard: Present - Property falls within an Erosion Hazard')")

@@ -118,6 +118,13 @@ def display_report():
                 for rec in report.slope_analysis.recommendations:
                     st.write(f"- {rec}")
             st.write("**Overall Feasibility:**", report.overall_feasibility if hasattr(report, 'overall_feasibility') else "N/A")
+            
+            # Add Hazard Layer Information
+            if hasattr(report, 'hazard_layers'):
+                st.write("**Hazard Layer Information:**")
+                for hazard in report.hazard_layers:
+                    st.write(f"- {hazard}")
+            
             if hasattr(report, 'detailed_recommendations'):
                 st.write("**Detailed Recommendations:**")
                 for rec in report.detailed_recommendations:

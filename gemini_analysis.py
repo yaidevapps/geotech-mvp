@@ -178,6 +178,19 @@ def generate_feasibility_report(
         logging.warning("Skipping feasibility report generation due to missing or failed Gemini initialization.")
         return None
 
+    # Format hazard layer information
+    hazard_descriptions = {
+        "erosion": "Erosion Hazard",
+        "potential_slide": "Potential Slide Hazard",
+        "seismic": "Seismic Hazard",
+        "steep_slope": "Steep Slope Hazard",
+        "watercourse": "Watercourse Buffer"
+    }
+    hazard_layer_list = [
+        f"{hazard_descriptions[key]}: {'Present' if value else 'Not Present'} - Property {'falls within' if value else 'does not fall within'} a {hazard_descriptions[key]}"
+        for key, value in environmental_hazards.items()
+    ]
+
     prompt = f"""
     {SYSTEM_PROMPT}
 
@@ -191,6 +204,9 @@ def generate_feasibility_report(
 
     Environmental Hazards Present:
     {json.dumps(environmental_hazards, indent=2)}
+
+    Precomputed Hazard Layer Information (use this directly in the report):
+    {json.dumps(hazard_layer_list, indent=2)}
 
     When generating this feasibility report:
 
@@ -223,6 +239,7 @@ def generate_feasibility_report(
     - "slope_analysis": Object containing "summary" and "recommendations" from the slope analysis
     - "overall_feasibility": Clear assessment using one of the four classifications defined above
     - "detailed_recommendations": List of 5-7 specific, actionable recommendations as strings, including cost indicators
+    - "hazard_layers": List of strings from the precomputed hazard layer information provided above (include these verbatim)
     """
     try:
         response = model.generate_content(prompt)
