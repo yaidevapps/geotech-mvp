@@ -206,10 +206,10 @@ def create_map(coordinates: Coordinates, property: Property, geojson_files: dict
             "Property Lines": {"color": "black", "weight": 1, "fill": False},
             "Contours": {"color": "gray", "weight": 1, "fill": False},
             "Erosion Hazard": {"fillColor": "orange", "color": "black", "weight": 1, "fillOpacity": 0.3},
-            "Potential Slide Hazard": {"fillColor": "purple", "color": "black", "weight": 1, "fillOpacity": 0.3},
-            "Seismic Hazard": {"fillColor": "red", "color": "black", "weight": 1, "fillOpacity": 0.3},
+            "Potential Slide Hazard": {"fillColor": "purple", "color": "black", "weight": 1, "fillOpacity": 0.2},
+            "Seismic Hazard": {"fillColor": "red", "color": "black", "weight": 1, "fillOpacity": 0.2},
             "Steep Slope Hazard": {"fillColor": "yellow", "color": "black", "weight": 1, "fillOpacity": 0.3},
-            "Watercourse Buffer": {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3},
+            "Watercourse Buffer": {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.15},
         }
 
         # Add other GeoJSON layers first (so Property layer renders on top)
@@ -238,7 +238,7 @@ def create_map(coordinates: Coordinates, property: Property, geojson_files: dict
                 "fillColor": "green",
                 "color": "blue",
                 "weight": 2,
-                "fillOpacity": 0.5,
+                "fillOpacity": 0.7,
                 "fill": True  # Explicitly enable fill
             },
             show=True
