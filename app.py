@@ -97,42 +97,75 @@ def perform_analysis(street: str, zip_code: str) -> None:
     st.session_state.feasibility_report = feasibility_report
 
 def display_report():
-    """Display the feasibility report and map from session state if all required data is present."""
+    """Display the feasibility report with expandable sections for a compact layout, fixing map overflow."""
     required_keys = ["coordinates", "property", "feasibility_report"]
-    if all(key in st.session_state and st.session_state[key] is not None for key in required_keys):
-        report = st.session_state.feasibility_report
-        # Additional check to ensure report has necessary attributes
-        if hasattr(report, "location_analysis") and hasattr(report, "slope_analysis"):
-            st.subheader("Property Map")
-            create_map(st.session_state.coordinates, st.session_state.property, GEOJSON_FILES)
-
-            st.subheader("Feasibility Report")
-            st.write("**Location Analysis Summary:**", report.location_analysis.summary if report.location_analysis else "Analysis unavailable")
-            if report.location_analysis and hasattr(report.location_analysis, 'recommendations'):
-                st.write("**Location Recommendations:**")
-                for rec in report.location_analysis.recommendations:
-                    st.write(f"- {rec}")
-            st.write("**Slope Analysis Summary:**", report.slope_analysis.summary if report.slope_analysis else "Analysis unavailable")
-            if report.slope_analysis and hasattr(report.slope_analysis, 'recommendations'):
-                st.write("**Slope Recommendations:**")
-                for rec in report.slope_analysis.recommendations:
-                    st.write(f"- {rec}")
-            st.write("**Overall Feasibility:**", report.overall_feasibility if hasattr(report, 'overall_feasibility') else "N/A")
-            
-            # Add Hazard Layer Information
-            if hasattr(report, 'hazard_layers'):
-                st.write("**Hazard Layer Information:**")
-                for hazard in report.hazard_layers:
-                    st.write(f"- {hazard}")
-            
-            if hasattr(report, 'detailed_recommendations'):
-                st.write("**Detailed Recommendations:**")
-                for rec in report.detailed_recommendations:
-                    st.write(f"- {rec}")
-        else:
-            st.warning("Feasibility report is incomplete. Please re-run the analysis.")
-    else:
+    if not all(key in st.session_state and st.session_state[key] is not None for key in required_keys):
         st.info("No analysis results available yet. Please enter an address and click 'Analyze Property'.")
+        return
+
+    report = st.session_state.feasibility_report
+    if not (hasattr(report, "location_analysis") and hasattr(report, "slope_analysis")):
+        st.warning("Feasibility report is incomplete. Please re-run the analysis.")
+        return
+
+    st.subheader("Feasibility Report", divider="gray")
+
+    # Property Map with Fixed Width Container
+    with st.expander("Property Map", expanded=True):
+        with st.spinner("Loading map..."):
+            map_container = st.container()
+            with map_container:
+                st.markdown(
+                    """
+                    <style>
+                    .map-container {
+                        max-width: 100%;
+                        overflow-x: auto;
+                    }
+                    .folium-map {
+                        max-width: 100% !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
+                create_map(st.session_state.coordinates, st.session_state.property, GEOJSON_FILES)
+
+    # Overall Feasibility
+    st.markdown(f"**Overall Feasibility:** {report.overall_feasibility}", unsafe_allow_html=True)
+
+    # Hazard Layers with Check Mark and X Icons
+    with st.expander("Hazard Layer Information", expanded=True):
+        if hasattr(report, 'hazard_layers'):
+            for hazard in report.hazard_layers:
+                icon = "✅" if "Not Present" in hazard else "❌"  # Check mark for Not Present, X for Present
+                st.write(f"{icon} {hazard}")
+        else:
+            st.write("Hazard layer information unavailable.")
+
+    # Location Analysis
+    with st.expander("Location Analysis"):
+        st.write("**Summary:**", report.location_analysis.summary if report.location_analysis else "Analysis unavailable")
+        if report.location_analysis and hasattr(report.location_analysis, 'recommendations'):
+            st.write("**Recommendations:**")
+            for rec in report.location_analysis.recommendations:
+                st.write(f"- {rec}")
+
+    # Slope Analysis
+    with st.expander("Slope Analysis"):
+        st.write("**Summary:**", report.slope_analysis.summary if report.slope_analysis else "Analysis unavailable")
+        if report.slope_analysis and hasattr(report.slope_analysis, 'recommendations'):
+            st.write("**Recommendations:**")
+            for rec in report.slope_analysis.recommendations:
+                st.write(f"- {rec}")
+
+    # Detailed Recommendations
+    with st.expander("Detailed Recommendations"):
+        if hasattr(report, 'detailed_recommendations'):
+            for rec in report.detailed_recommendations:
+                st.write(f"- {rec}")
+        else:
+            st.write("No detailed recommendations available.")
 
 def main():
     st.title("Geotechnical Engineering Assistant - Mercer Island, WA")
