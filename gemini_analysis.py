@@ -35,7 +35,7 @@ try:
 except Exception as e:
     logging.error(f"Failed to initialize Gemini model with google-generativeai: {str(e)}")
 
-# Updated System Prompt
+# Updated System Prompt with explicit instruction for string recommendations
 SYSTEM_PROMPT = """
 You are a geotechnical engineering assistant specializing in property feasibility analysis for Mercer Island, WA. Mercer Island is characterized by varied topography with steep slopes, seismic concerns, and erosion hazards due to its location in the Puget Sound region. The island has specific municipal codes (MICC 19.07) governing construction on environmentally critical areas.
 
@@ -52,6 +52,7 @@ When generating responses, follow these principles:
 - Highlight risks in order of severity (critical, major, minor)
 - Provide actionable recommendations that reference specific mitigation techniques
 - Include cost implications where relevant (low, moderate, high)
+- For 'recommendations' fields, return each item as a single string that incorporates priority and cost details (e.g., "Critical: Conduct soil boring tests to 15 feet (moderate cost)")
 
 Return all responses as a JSON object with the required fields, enclosed in triple backticks (```json ... ```). If any data is missing or unclear, state your assumptions clearly and provide default values based on Mercer Island averages.
 """
@@ -90,7 +91,7 @@ def analyze_location(latitude: float, longitude: float, address: str) -> Optiona
 
     Return a JSON object with:
     - "summary": A comprehensive 3-5 sentence technical assessment
-    - "recommendations": 3-5 specific, actionable recommendations ordered by priority
+    - "recommendations": 3-5 specific, actionable recommendations as strings, ordered by priority, including priority level (e.g., Critical, Major, Minor) and cost implication (e.g., low, moderate, high) in the text (e.g., "Critical: Conduct soil tests (moderate cost)")
     """
     try:
         response = model.generate_content(prompt)
@@ -149,7 +150,7 @@ def analyze_slope(slope: float, elevation_diff: float, distance: float) -> Optio
 
     Return a JSON object with:
     - "summary": A technically precise assessment of engineering challenges
-    - "recommendations": 3-5 specific construction and mitigation strategies ordered by cost-effectiveness
+    - "recommendations": 3-5 specific construction and mitigation strategies as strings, ordered by cost-effectiveness, including cost implication (e.g., low, moderate, high) in the text (e.g., "Install stepped footings (moderate cost)")
     """
     try:
         response = model.generate_content(prompt)
@@ -215,13 +216,13 @@ def generate_feasibility_report(
        - Specific and actionable
        - Ordered by implementation sequence
        - Referenced to applicable codes where relevant
-       - Include cost impact indicators (low/moderate/high)
+       - Include cost impact indicators (low/moderate/high) as part of the string (e.g., "Conduct soil borings per MICC 19.07.120 (moderate cost)")
 
     Return a JSON object with the following structure:
     - "location_analysis": Object containing "summary" and "recommendations" from the location analysis
     - "slope_analysis": Object containing "summary" and "recommendations" from the slope analysis
     - "overall_feasibility": Clear assessment using one of the four classifications defined above
-    - "detailed_recommendations": List of 5-7 specific, actionable recommendations
+    - "detailed_recommendations": List of 5-7 specific, actionable recommendations as strings, including cost indicators
     """
     try:
         response = model.generate_content(prompt)
