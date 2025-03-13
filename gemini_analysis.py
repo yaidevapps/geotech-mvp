@@ -6,9 +6,14 @@ from typing import Optional
 from models import LocationAnalysis, SlopeAnalysis, FeasibilityReport
 import json
 
+# Ensure the logs directory exists
+log_dir = "logs"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
 # Configure logging
 logging.basicConfig(
-    filename="logs/geotech_debug.log",
+    filename=os.path.join(log_dir, "geotech_debug.log"),
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
