@@ -63,17 +63,16 @@ def perform_analysis(street: str, zip_code: str) -> None:
     # Step 6: Gemini slope analysis
     with st.spinner("Performing slope analysis..."):
         # SlopeData has average_slope and max_slope in degrees
-        avg_slope = slope_data.average_slope if hasattr(slope_data, 'average_slope') else 0
-        # Convert slope percentage to elevation difference and distance
+        avg_slope_deg = slope_data.average_slope if hasattr(slope_data, 'average_slope') else 0
+        # Convert slope from degrees to percentage for the updated prompt
+        avg_slope_percent = np.tan(np.radians(avg_slope_deg)) * 100
         # Assume a hypothetical distance of 10 meters if unknown
         dist = 10.0  # Default distance in meters
-        # slope (%) = (elevation_diff / distance) * 100
-        # elevation_diff (meters) = (slope / 100) * distance
-        elev_diff_m = (avg_slope / 100) * dist
-        # Convert elevation difference to feet (1 meter = 3.28084 feet)
-        elev_diff_ft = elev_diff_m * 3.28084
+        # Calculate elevation difference in feet based on percentage
+        elev_diff_m = (avg_slope_percent / 100) * dist  # elevation_diff = (slope % / 100) * distance
+        elev_diff_ft = elev_diff_m * 3.28084  # Convert meters to feet
         slope_analysis = analyze_slope(
-            slope=avg_slope,
+            slope=avg_slope_percent,
             elevation_diff=elev_diff_ft,
             distance=dist
         )
@@ -134,11 +133,11 @@ def display_report():
     # Overall Feasibility
     st.markdown(f"**Overall Feasibility:** {report.overall_feasibility}", unsafe_allow_html=True)
 
-    # Hazard Layers with Check Mark and X Icons
+    # Hazard Layers with Green Circle (🟢) for Not Present and Red Circle (🔴) for Present
     with st.expander("Hazard Layer Information", expanded=True):
         if hasattr(report, 'hazard_layers'):
             for hazard in report.hazard_layers:
-                icon = "✅" if "Not Present" in hazard else "❌"  # Check mark for Not Present, X for Present
+                icon = "🟢" if "Not Present" in hazard else "🔴"  # Green circle for Not Present, Red circle for Present
                 st.write(f"{icon} {hazard}")
         else:
             st.write("Hazard layer information unavailable.")
