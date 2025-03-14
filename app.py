@@ -5,8 +5,8 @@ from gemini_analysis import analyze_location, analyze_slope, generate_feasibilit
 import numpy as np
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging to ensure INFO level logs are visible
+logging.basicConfig(level=logging.INFO)
 
 # Define GeoJSON files for map display
 GEOJSON_FILES = {
@@ -48,7 +48,7 @@ def perform_analysis(street: str, zip_code: str) -> None:
     if not slope_data:
         st.error("Failed to calculate slope data.")
         return
-    logging.debug(f"Slope Data - Average: {slope_data.average_slope}, Max: {slope_data.max_slope}")
+    logging.info(f"Slope Data - Average: {slope_data.average_slope}, Max: {slope_data.max_slope}")
     st.session_state.slope_data = slope_data
 
     environmental_check = check_environmental_hazards(property)
@@ -95,7 +95,7 @@ def perform_analysis(street: str, zip_code: str) -> None:
     st.session_state.feasibility_report = feasibility_report
 
 def display_report():
-    """Display the feasibility report with expandable sections and feedback options."""
+    """Display the feasibility report with styled sections and functional feedback buttons."""
     required_keys = ["coordinates", "property", "feasibility_report"]
     if not all(key in st.session_state and st.session_state[key] is not None for key in required_keys):
         st.info("No analysis results available yet. Please enter an address and click 'Analyze Property'.")
@@ -105,6 +105,100 @@ def display_report():
     if not (hasattr(report, "location_analysis") and hasattr(report, "slope_analysis")):
         st.warning("Feasibility report is incomplete. Please re-run the analysis.")
         return
+
+    # Inject custom CSS with updated button hover styles
+    st.markdown("""
+    <style>
+    .feasibility-title {
+        font-size: 20px;
+        font-weight: bold;
+        /* Removed color to inherit default */
+        margin-bottom: 12px;
+    }
+    .hazard-present {
+        background-color: #fef2f2;
+        border: 1px solid #f87171;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+    }
+    .hazard-absent {
+        background-color: #ecfdf5;
+        border: 1px solid #34d399;
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+    }
+    .status-dot-present {
+        width: 12px;
+        height: 12px;
+        background-color: #ef4444;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+    }
+    .status-dot-absent {
+        width: 12px;
+        height: 12px;
+        background-color: #10b981;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+    }
+    .critical-card {
+        border: 1px solid #f87171;
+        background-color: #fee2e2;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 8px;
+    }
+    .major-card {
+        border: 1px solid #fb923c;
+        background-color: #ffedd5;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 8px;
+    }
+    .minor-card {
+        border: 1px solid #34d399;
+        background-color: #ecfdf5;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 8px;
+    }
+    .priority-label {
+        font-weight: bold;
+    }
+    .confidence-level {
+        font-weight: bold;
+    }
+    div.stButton > button {
+        background-color: #e5e7eb;
+        color: #374151;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        border: none;
+        cursor: pointer;
+    }
+    div.stButton > button:hover {
+        background-color: #f4a8a8;  /* Light red on hover */
+        color: #374151;  /* Ensure text color stays the same */
+    }
+    @media (max-width: 640px) {
+        .recommendation-row {
+            display: block;
+        }
+        .recommendation-text, div.stButton > button {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     st.subheader("Feasibility Report", divider="gray")
 
@@ -128,13 +222,19 @@ def display_report():
                 )
                 create_map(st.session_state.coordinates, st.session_state.property, GEOJSON_FILES)
 
-    st.markdown(f"**Overall Feasibility:** {report.overall_feasibility}", unsafe_allow_html=True)
+    st.markdown(f'<div class="feasibility-title">Overall Feasibility: {report.overall_feasibility}</div>', unsafe_allow_html=True)
 
     with st.expander("Hazard Layer Information", expanded=True):
         if hasattr(report, 'hazard_layers'):
             for hazard in report.hazard_layers:
-                icon = "🟢" if "Not Present" in hazard else "🔴"
-                st.write(f"{icon} {hazard}")
+                is_present = "Present" in hazard and "Not Present" not in hazard
+                logging.info(f"Hazard: {hazard}, is_present: {is_present}")
+                st.markdown(
+                    f'<div class="{"hazard-present" if is_present else "hazard-absent"}">'
+                    f'<span class="{"status-dot-present" if is_present else "status-dot-absent"}"></span>'
+                    f'{hazard}</div>',
+                    unsafe_allow_html=True
+                )
         else:
             st.write("Hazard layer information unavailable.")
 
@@ -143,9 +243,23 @@ def display_report():
         if report.location_analysis and hasattr(report.location_analysis, 'recommendations'):
             st.write("**Recommendations:**")
             for rec in report.location_analysis.recommendations:
-                col1, col2 = st.columns([4, 1])
+                priority = rec.split("]:")[0][1:].lower()  # Extract "Critical", "Major", "Minor"
+                card_class = f"{priority}-card"
+                # Split recommendation into priority, body, and confidence
+                parts = rec.split(" - Confidence: ")
+                if len(parts) == 2:
+                    body = parts[0]
+                    confidence = "Confidence: " + parts[1]
+                    priority_part, body_part = body.split("]: ", 1)
+                    styled_rec = (
+                        f'<span class="priority-label">{priority_part}]:</span> '
+                        f'{body_part} - <span class="confidence-level">{confidence}</span>'
+                    )
+                else:
+                    styled_rec = rec  # Fallback if format doesn't match
+                col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"- {rec}")
+                    st.markdown(f'<div class="{card_class}">{styled_rec}</div>', unsafe_allow_html=True)
                 with col2:
                     if st.button("Flag This", key=f"loc_{rec[:50]}"):
                         log_feedback("Location Analysis", rec, "User flagged as inconsistent")
@@ -156,9 +270,22 @@ def display_report():
         if report.slope_analysis and hasattr(report.slope_analysis, 'recommendations'):
             st.write("**Recommendations:**")
             for rec in report.slope_analysis.recommendations:
-                col1, col2 = st.columns([4, 1])
+                priority = rec.split("]:")[0][1:].lower()
+                card_class = f"{priority}-card"
+                parts = rec.split(" - Confidence: ")
+                if len(parts) == 2:
+                    body = parts[0]
+                    confidence = "Confidence: " + parts[1]
+                    priority_part, body_part = body.split("]: ", 1)
+                    styled_rec = (
+                        f'<span class="priority-label">{priority_part}]:</span> '
+                        f'{body_part} - <span class="confidence-level">{confidence}</span>'
+                    )
+                else:
+                    styled_rec = rec
+                col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"- {rec}")
+                    st.markdown(f'<div class="{card_class}">{styled_rec}</div>', unsafe_allow_html=True)
                 with col2:
                     if st.button("Flag This", key=f"slope_{rec[:50]}"):
                         log_feedback("Slope Analysis", rec, "User flagged as inconsistent")
@@ -167,9 +294,22 @@ def display_report():
     with st.expander("Detailed Recommendations"):
         if hasattr(report, 'detailed_recommendations'):
             for rec in report.detailed_recommendations:
-                col1, col2 = st.columns([4, 1])
+                priority = rec.split("]:")[0][1:].lower()
+                card_class = f"{priority}-card"
+                parts = rec.split(" - Confidence: ")
+                if len(parts) == 2:
+                    body = parts[0]
+                    confidence = "Confidence: " + parts[1]
+                    priority_part, body_part = body.split("]: ", 1)
+                    styled_rec = (
+                        f'<span class="priority-label">{priority_part}]:</span> '
+                        f'{body_part} - <span class="confidence-level">{confidence}</span>'
+                    )
+                else:
+                    styled_rec = rec
+                col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"- {rec}")
+                    st.markdown(f'<div class="{card_class}">{styled_rec}</div>', unsafe_allow_html=True)
                 with col2:
                     if st.button("Flag This", key=f"detail_{rec[:50]}"):
                         log_feedback("Detailed Recommendations", rec, "User flagged as inconsistent")
