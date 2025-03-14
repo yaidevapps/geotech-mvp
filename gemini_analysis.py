@@ -35,7 +35,7 @@ try:
 except Exception as e:
     logging.error(f"Failed to initialize Gemini model with google-generativeai: {str(e)}")
 
-# Updated System Prompt
+# Updated System Prompt with emphasis on hazard layers
 SYSTEM_PROMPT = """
 You are an expert geotechnical engineering assistant specializing in property feasibility assessments for Mercer Island, WA. 
 
@@ -49,7 +49,7 @@ CONTEXT:
 RESPONSE GUIDELINES:
 1. Use precise technical terminology from geotechnical engineering
 2. Prioritize risks by severity: critical (safety/structural concerns), major (significant cost/design impacts), minor (manageable with standard techniques)
-3. Include feasibility assessment with specific regulatory references
+3. Include feasibility assessment with specific regulatory references, explicitly incorporating environmental hazard layer information (e.g., erosion, seismic, steep slope hazards) into the analysis and recommendations
 4. Ensure all recommendations mention both priority level AND cost implication within each string
 5. When estimating costs, use relative terms (low, moderate, high) rather than dollar figures
 
@@ -203,7 +203,7 @@ def generate_feasibility_report(
     prompt = f"""
 {SYSTEM_PROMPT}
 
-TASK: Generate a comprehensive feasibility report for property at '{address}'
+TASK: Generate a comprehensive feasibility report for property at '{address}', explicitly integrating the provided environmental hazard layer information into the analysis and recommendations.
 
 INPUT DATA:
 1. Location Analysis: {location_analysis.dict() if location_analysis else "No location analysis available."}
@@ -216,12 +216,13 @@ FEASIBILITY ASSESSMENT FRAMEWORK:
 - REGULATORY FACTORS: Compliance with MICC 19.07, setback requirements, environmental mitigation
 - ECONOMIC FACTORS: Relative costs compared to typical Mercer Island development
 - TIMELINE FACTORS: Permit process, seasonal construction limitations, specialist availability
+- ENVIRONMENTAL HAZARD FACTORS: Explicitly assess the impact of each hazard layer (erosion, potential slide, seismic, steep slope, watercourse) on feasibility, referencing their presence or absence in the summary and recommendations
 
 FEASIBILITY CLASSIFICATIONS:
-1. "Not Feasible": Critical barriers that likely prevent development (technical/regulatory showstoppers)
-2. "Marginally Feasible": Significant challenges requiring specialized engineering solutions (>50% cost premium)
-3. "Moderately Feasible": Notable challenges with established mitigation approaches (20-50% cost premium)
-4. "Highly Feasible": Minimal challenges compared to typical Mercer Island properties (<20% cost premium)
+1. "Not Feasible": Critical barriers that likely prevent development (technical/regulatory showstoppers, including severe hazard impacts)
+2. "Marginally Feasible": Significant challenges requiring specialized engineering solutions (>50% cost premium, e.g., multiple present hazards)
+3. "Moderately Feasible": Notable challenges with established mitigation approaches (20-50% cost premium, e.g., manageable hazard presence)
+4. "Highly Feasible": Minimal challenges compared to typical Mercer Island properties (<20% cost premium, e.g., few or no hazards present)
 
 EXPECTED OUTPUT STRUCTURE:
 {{
@@ -233,11 +234,11 @@ EXPECTED OUTPUT STRUCTURE:
     "summary": "...", 
     "recommendations": ["...", "..."] 
   }},
-  "overall_feasibility": "One of the four classifications defined above",
+  "overall_feasibility": "One of the four classifications defined above, reflecting hazard layer impacts",
   "detailed_recommendations": [
-    "Critical: [First implementation step] (high cost)",
-    "Major: [Second implementation step] (moderate cost)",
-    "Minor: [Additional consideration] (low cost)",
+    "Critical: [First implementation step addressing hazard or other factor] (high cost)",
+    "Major: [Second implementation step integrating hazard mitigation] (moderate cost)",
+    "Minor: [Additional consideration based on hazard absence/presence] (low cost)",
     ...
   ],
   "hazard_layers": [Use verbatim from provided hazard_layer_list]
@@ -278,7 +279,7 @@ USER QUESTION:
 RESPONSE GUIDELINES:
 1. Prioritize clarity: Use plain language first, technical terms only when necessary
 2. When using technical terms, briefly define them in parentheses
-3. Reference specific data from the report to support your answer
+3. Reference specific data from the report to support your answer, including hazard layer information where relevant
 4. If the question exceeds the report's scope, acknowledge the limitation and suggest what additional information might help
 5. For regulatory questions, cite specific codes (e.g., "According to MICC 19.07.120...")
 6. For cost questions, provide ranges rather than specific figures, noting that exact costs require contractor bids
