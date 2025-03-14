@@ -205,6 +205,13 @@ def main():
 
     with st.sidebar:
         st.header("Address Input")
+        st.markdown("""
+        **How to Use This App:**
+        1. Enter a Mercer Island street address (e.g., "1925 82nd Ave SE") and optional ZIP code.
+        2. Click "Analyze Property" to generate a feasibility report with slope, hazard, and location insights.
+        3. View results in the "Analysis" tab—expand sections for details and use "Flag This" to report issues.
+        4. Ask questions about your report in the "Chat" tab.
+        """)
         street = st.text_input("Street Address", value=st.session_state.street_input, placeholder="e.g., 1234 Main St", key="street")
         zip_code = st.text_input("ZIP Code (optional)", value=st.session_state.zip_input, placeholder="e.g., 98040", key="zip")
         analyze_button = st.button("Analyze Property")
