@@ -3,7 +3,6 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 from shapely.geometry import Point, shape
 from shapely.validation import make_valid
-from shapely.wkt import dumps
 from typing import Optional
 import numpy as np
 import folium
@@ -11,13 +10,9 @@ from streamlit_folium import folium_static
 from models import Address, Coordinates, Property, SlopeData, EnvironmentalCheck
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
-
-# Initialize Nominatim geocoder
 geolocator = Nominatim(user_agent="geotech_mvp_app")
 
-# Paths to GeoJSON files
 PROPERTY_FILE = "data/Mercer_Island_Basemap_Data_Layers_PropertyLine.geojson"
 CONTOUR_FILE = "data/Mercer_Island_Environmental_Layers_10ftLidarContours.geojson"
 HAZARD_FILES = {
@@ -29,7 +24,6 @@ HAZARD_FILES = {
 }
 
 def geocode_address(address: Address) -> Optional[Coordinates]:
-    """Convert an address to latitude/longitude coordinates using Nominatim."""
     try:
         location = geolocator.geocode(address.full_address())
         if location:
@@ -37,14 +31,13 @@ def geocode_address(address: Address) -> Optional[Coordinates]:
         else:
             raise ValueError("Address not found in Mercer Island, WA.")
     except (GeocoderTimedOut, GeocoderServiceError) as e:
-        logging.error(f"Geocoding error: {e}")
+        logging.error(f"Geocoding error for {address.full_address()}: {e}")
         return None
     except Exception as e:
-        logging.error(f"Unexpected error during geocoding: {e}")
+        logging.error(f"Unexpected error during geocoding of {address.full_address()}: {e}")
         return None
 
 def load_geojson(file_path: str) -> gpd.GeoDataFrame:
-    """Load a GeoJSON file into a GeoDataFrame."""
     try:
         return gpd.read_file(file_path)
     except Exception as e:
@@ -52,7 +45,6 @@ def load_geojson(file_path: str) -> gpd.GeoDataFrame:
         raise
 
 def extract_property(coordinates: Coordinates) -> Optional[Property]:
-    """Extract property data based on geocoded coordinates."""
     try:
         properties_gdf = load_geojson(PROPERTY_FILE)
         if "PIN" not in properties_gdf.columns:
@@ -62,14 +54,13 @@ def extract_property(coordinates: Coordinates) -> Optional[Property]:
         for idx, row in properties_gdf.iterrows():
             if row.geometry.contains(point):
                 return Property(parcel_id=row["PIN"], geometry=row.geometry.__geo_interface__)
-        logging.warning("No property found at the given coordinates.")
+        logging.warning(f"No property found at coordinates ({coordinates.latitude}, {coordinates.longitude}).")
         return None
     except Exception as e:
-        logging.error(f"Error extracting property: {e}")
+        logging.error(f"Error extracting property at ({coordinates.latitude}, {coordinates.longitude}): {e}")
         return None
 
 def calculate_slope(property: Property) -> Optional[SlopeData]:
-    """Calculate slope data by intersecting property with contour lines, with lakefront validation."""
     try:
         contours_gdf = load_geojson(CONTOUR_FILE).to_crs("EPSG:32610")
         logging.debug(f"Loaded {len(contours_gdf)} contours with columns: {contours_gdf.columns.tolist()}")
@@ -77,11 +68,10 @@ def calculate_slope(property: Property) -> Optional[SlopeData]:
         property_geom = shape(property.geometry)
         property_geom_proj = gpd.GeoSeries([property_geom], crs="EPSG:4326").to_crs("EPSG:32610")[0]
         
-        # Intersect property with contours, with buffer if needed
         intersections = contours_gdf[contours_gdf.intersects(property_geom_proj)].copy()
         if len(intersections) < 2:
             logging.warning(f"Only {len(intersections)} intersections for parcel {property.parcel_id}. Applying 10m buffer...")
-            buffered_geom = property_geom_proj.buffer(10)  # 10m buffer to capture more contours
+            buffered_geom = property_geom_proj.buffer(10)
             intersections = contours_gdf[contours_gdf.intersects(buffered_geom)].copy()
         
         intersections['geometry'] = intersections.geometry.intersection(property_geom_proj)
@@ -89,7 +79,7 @@ def calculate_slope(property: Property) -> Optional[SlopeData]:
         logging.debug(f"Found {len(intersections)} contour intersections for parcel {property.parcel_id}")
         
         if len(intersections) < 2:
-            logging.warning(f"Still insufficient contour intersections ({len(intersections)}) for parcel {property.parcel_id}. Assuming flat slope.")
+            logging.warning(f"Insufficient contour intersections ({len(intersections)}) for parcel {property.parcel_id}. Assuming flat slope.")
             return SlopeData(average_slope=0.0, max_slope=0.0)
         
         if "Elevation" not in intersections.columns:
@@ -108,7 +98,7 @@ def calculate_slope(property: Property) -> Optional[SlopeData]:
             centroid1 = geom1.centroid
             centroid2 = geom2.centroid
             dist = centroid1.distance(centroid2)
-            if 0.5 < dist <= 1000:  # Filter unrealistic distances
+            if 0.5 < dist <= 1000:
                 slope_deg = np.degrees(np.arctan(elev_diff / dist))
                 slopes.append(slope_deg)
                 distances.append(dist)
@@ -123,17 +113,15 @@ def calculate_slope(property: Property) -> Optional[SlopeData]:
         avg_distance = np.mean(distances)
         logging.info(f"Calculated slopes for parcel {property.parcel_id}: {slopes}, Average: {avg_slope}°, Max: {max_slope}°, Avg Distance: {avg_distance}m")
         
-        # Sanity check for extreme slopes
         if avg_slope > 45:
             logging.warning(f"Extreme slope detected: {avg_slope}° for parcel {property.parcel_id}. Verify contour data accuracy.")
         
-        # Lakefront validation
         erosion_gdf = load_geojson(HAZARD_FILES["erosion"]).to_crs("EPSG:32610")
-        property_buffer = property_geom_proj.buffer(100)  # 100m buffer for lake proximity
+        property_buffer = property_geom_proj.buffer(100)
         lake_proximity = erosion_gdf.intersects(property_buffer).any()
         if lake_proximity and avg_slope < 5:
             logging.warning(
-                f"Parcel {property.parcel_id} near lake (erosion hazard within 100m) but slope is flat ({avg_slope}°). "
+                f"Parcel {property.parcel_id} near lake but slope is flat ({avg_slope}°). "
                 "Possible contour data omission—recommend topographic survey."
             )
             if max_slope < 15:
@@ -146,14 +134,16 @@ def calculate_slope(property: Property) -> Optional[SlopeData]:
         return SlopeData(average_slope=0.0, max_slope=0.0)
 
 def check_environmental_hazards(property: Property) -> Optional[EnvironmentalCheck]:
-    """Check if the property intersects environmental hazard layers with severity quantification."""
     try:
         property_geom = shape(property.geometry)
-        property_area = property_geom.area
+        property_gdf = gpd.GeoSeries([property_geom], crs="EPSG:4326").to_crs("EPSG:32610")
+        property_geom_proj = property_gdf[0]
+        property_area = property_geom_proj.area
+        
         hazards = {}
         for hazard_type, file_path in HAZARD_FILES.items():
-            hazard_gdf = load_geojson(file_path)
-            intersection_area = hazard_gdf.intersection(property_geom).area.sum()
+            hazard_gdf = load_geojson(file_path).to_crs("EPSG:32610")
+            intersection_area = hazard_gdf.intersection(property_geom_proj).area.sum()
             overlap_ratio = intersection_area / property_area if property_area > 0 else 0
             intersects = overlap_ratio > 0.1  # Significant overlap threshold
             hazards[hazard_type] = intersects
@@ -171,7 +161,6 @@ def check_environmental_hazards(property: Property) -> Optional[EnvironmentalChe
         return None
 
 def create_map(coordinates: Coordinates, property: Property, geojson_files: dict) -> None:
-    """Create an interactive map with all GeoJSON layers using Folium."""
     try:
         m = folium.Map(location=[coordinates.latitude, coordinates.longitude], zoom_start=15)
         
