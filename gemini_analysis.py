@@ -3,7 +3,7 @@ import logging
 from dotenv import load_dotenv
 import google.generativeai as genai
 from typing import Optional, List
-from models import LocationAnalysis, SlopeAnalysis, FeasibilityReport
+from models import LocationAnalysis, SlopeAnalysis, FeasibilityReport, SlopeData
 import json
 import numpy as np
 
@@ -24,21 +24,31 @@ else:
 
 # Define the enhanced system prompt
 SYSTEM_PROMPT = """
-You are GeotechExpert, a geotechnical engineering AI assistant specialized in Mercer Island properties, designed to deliver accurate, data-driven feasibility assessments.
+You are GeotechExpert, a geotechnical engineering AI assistant with deep expertise in Mercer Island, WA, properties, designed to deliver precise, data-driven feasibility assessments comparable to a seasoned professional with 25 years of regional experience.
 
 1. ROLE:
-- Analyze geotechnical factors (e.g., slope stability, soil conditions) based solely on provided input data.
-- Use precise geotechnical terms (e.g., 'factor of safety', 'liquefaction potential').
+- Analyze geotechnical factors (e.g., slope stability, soil conditions, liquefaction potential) using provided data, enriched with Mercer Island-specific knowledge (e.g., glacial till over lacustrine deposits, lakefront erosion dynamics).
+- Use precise geotechnical terminology (e.g., 'factor of safety', 'angle of repose') and reference regional standards (e.g., MICC 19.07, USGS seismic data).
 
 2. BOUNDARIES:
-- DO NOT provide legal advice, specific cost estimates (e.g., dollar amounts), or non-geotechnical information.
-- DO NOT speculate beyond the provided data; if data is missing, use Mercer Island averages and state assumptions explicitly (e.g., 'Assuming glacial till soil due to regional norms').
-- For out-of-scope queries, respond: 'I'm limited to geotechnical analysis and cannot assist with [legal/cost] matters.'
+- DO NOT provide legal advice, specific cost estimates (e.g., dollar amounts), or non-geotechnical information unless explicitly tied to feasibility (e.g., permitting implications).
+- DO NOT speculate beyond data; if data is missing, use Mercer Island norms (e.g., 'Assuming glacial till with 30° angle of repose unless verified') and flag verification needs.
+- For out-of-scope queries, respond: 'I'm limited to geotechnical analysis and cannot assist with [legal/cost] matters without additional context.'
 
-3. RESPONSE GUIDELINES:
+3. ANALYSIS GUIDELINES:
+- Contextualize findings with Mercer Island's geology (e.g., steep lakefront slopes, saturated soils).
+- Flag anomalies (e.g., slopes >40% with no slide history) with 'Potential inconsistency—verify data.'
+- Assign confidence levels based on data quality: High (complete data), Medium (partial data with norms), Low (assumptions only).
+- Integrate hazards into a cohesive assessment (e.g., erosion + steep slope = compounded slide risk).
+
+4. RESPONSE GUIDELINES:
 - Return structured JSON in triple backticks (```json ... ```).
-- Format recommendations as '[Priority]: [Text] ([cost level] cost)' using only [Critical], [Major], or [Minor] as priorities, with relative costs (low, moderate, high).
-- Include a confidence level (High, Medium, Low) for each recommendation, based on data sufficiency.
+- Format recommendations as '[Priority]: [Text] ([cost level] cost) - Confidence: [Level]' using [Critical], [Major], or [Minor], with relative costs (low, moderate, high).
+- Provide specific, actionable steps (e.g., 'Conduct 3-4 borings to 20 ft depth') over generic advice.
+- Include a 'verification_needed' field if assumptions are made (e.g., soil type).
+
+5. USER ADAPTATION:
+- For chat responses, detect user expertise (technical vs. layperson) from query phrasing and adjust tone: technical (e.g., 'Liquefaction potential requires SPT data') or plain (e.g., 'The ground might shift in an earthquake—more tests needed').
 """
 
 def parse_gemini_json_response(response_text: str) -> dict:
@@ -71,8 +81,8 @@ def parse_gemini_json_response(response_text: str) -> dict:
     else:
         raise ValueError(f"Response is not in expected JSON format: {response_text}")
 
-def analyze_location(latitude: float, longitude: float, address: str) -> Optional[LocationAnalysis]:
-    """Analyze the geotechnical aspects of a property location."""
+def analyze_location(latitude: float, longitude: float, address: str, hazards: dict, lake_proximity: bool) -> Optional[LocationAnalysis]:
+    """Analyze the geotechnical aspects of a property location with Mercer Island context."""
     if model is None:
         logging.warning("Gemini model not initialized. Skipping location analysis.")
         return None
@@ -85,40 +95,40 @@ TASK: Analyze property location at latitude {latitude}, longitude {longitude}, a
 KEY DATA SUMMARY:
 - Coordinates: {latitude}, {longitude}
 - Address: {address}
+- Environmental Hazards: {json.dumps(hazards)}
+- Lake Proximity (within 100m of erosion hazard): {lake_proximity}
 
 REASONING PROCESS:
-1. Determine the property's position on Mercer Island (e.g., eastern shore, central plateau).
-2. Assess proximity to known geological features (e.g., water bodies, steep slopes).
-3. Evaluate construction access based on location.
-4. Consider neighborhood context and historical issues.
+1. Identify topographic position (e.g., lakefront, plateau) using coordinates and hazard data.
+2. Assess proximity to geological features (e.g., Lake Washington shoreline <100m = wave erosion risk) if lake_proximity or erosion hazard is true.
+3. Evaluate access constraints only if hazards suggest steep terrain or watercourse issues.
+4. If no hazards and not near lakefront, prioritize minimal investigation.
 
 INSTRUCTIONS:
-- Base your analysis strictly on the provided coordinates and address.
-- If specific data is missing (e.g., exact distance to water), use regional norms and state assumptions (e.g., 'Assuming typical distance for eastern shore properties').
-- Use only [Critical], [Major], or [Minor] as recommendation priorities.
-- Include confidence levels for each recommendation (High, Medium, Low).
-- If your assessment seems inconsistent (e.g., a central plateau property with steep slope concerns), flag it as 'Potential inconsistency—please verify data.'
-
-EXPECTED OUTPUT STRUCTURE:
+- Use hazard data to tailor recommendations (e.g., erosion present = silt fences).
+- Recommend specific tests only if risks are indicated (e.g., 'Borings to 20 ft' for seismic or lakefront).
+- Output:
 ```json
 {{
-  "summary": "A 3-5 sentence technical assessment",
+  "summary": "Property at {address} shows flat topography and no immediate hazard risks based on data.",
   "recommendations": [
-    "[Critical]: Assess erosion risk near shore (high cost) - Confidence: High",
-    "[Minor]: Ensure driveway access (low cost) - Confidence: Medium"
-  ]
+    "[Minor]: Conduct shallow borings to confirm soil stability (low cost) - Confidence: High"
+  ],
+  "verification_needed": ["Soil type"]
 }}
 """
     try:
+        logging.debug(f"Location Analysis Prompt: {prompt}")
         response = model.generate_content(prompt)
+        logging.debug(f"Location Analysis Response: {response.text}")
         response_data = parse_gemini_json_response(response.text)
         return LocationAnalysis(**response_data)
     except Exception as e:
         logging.error(f"Error in analyze_location: {e}")
         return None
 
-def analyze_slope(slope: float, elevation_diff: float, distance: float) -> Optional[SlopeAnalysis]:
-    """Analyze the slope profile of a property."""
+def analyze_slope(slope: float, elevation_diff: float, distance: float, lake_proximity: bool) -> Optional[SlopeAnalysis]:
+    """Analyze the slope profile of a property with detailed stability assessment."""
     if model is None:
         logging.warning("Gemini model not initialized. Skipping slope analysis.")
         return None
@@ -126,37 +136,37 @@ def analyze_slope(slope: float, elevation_diff: float, distance: float) -> Optio
     prompt = f"""
 {SYSTEM_PROMPT}
 
-TASK: Analyze slope profile with {slope:.2f}% slope, {elevation_diff:.2f} ft elevation difference, {distance:.2f} m distance
+TASK: Analyze slope profile with {slope:.2f}° slope, {elevation_diff:.2f} m elevation difference, {distance:.2f} m distance
 
 KEY DATA SUMMARY:
-- Slope: {slope:.2f}% (equivalent to {np.degrees(np.arctan(slope / 100)):.2f} degrees)
-- Elevation Difference: {elevation_diff:.2f} ft
+- Slope: {slope:.2f}°
+- Elevation Difference: {elevation_diff:.2f} m
 - Distance: {distance:.2f} m
+- Lake Proximity (within 100m of erosion hazard): {lake_proximity}
 
 REASONING PROCESS:
-1. Classify the slope using Mercer Island standards (<15% mild, 15-25% moderate, 25-40% steep, >40% very steep).
-2. Evaluate stability based on typical Mercer Island soil types (e.g., glacial till, outwash).
-3. Recommend foundation or drainage solutions based on slope severity.
+1. Classify slope per Mercer Island standards: <15° mild, 15-25° moderate, 25-40° steep, >40° very steep (exceeds glacial till repose).
+2. Assess stability using typical soil types (glacial till = 30° repose, lacustrine = 20° repose) unless specified.
+3. If slope <5° but lake_proximity is true, flag 'Potential inconsistency—verify topographic survey near lakefront.'
+4. Recommend solutions based on slope and soil (e.g., >40° = soldier piles, <25° = drainage).
 
 INSTRUCTIONS:
-- Base each step explicitly on the provided slope, elevation difference, and distance data.
-- If soil type is unknown, assume glacial till and state: 'Assuming glacial till soil due to regional norms.'
-- Provide interim conclusions after each step.
-- Use only [Critical], [Major], or [Minor] as recommendation priorities.
-- Include confidence levels for recommendations (e.g., 'High confidence due to clear slope data').
-
-EXPECTED OUTPUT STRUCTURE:
+- Assume glacial till unless contradicted; flag: 'Verification Needed: Soil layering.'
+- Specify test locations (e.g., '3-4 borings across slope') and methods (e.g., 'Direct shear testing').
+- Output:
 ```json
 {{
-  "summary": "A 3-5 sentence assessment with reasoning steps",
+  "summary": "Slope is flat (<5°), but lakefront proximity suggests potential instability—verify data.",
   "recommendations": [
-    "[Major]: Install retaining wall (moderate cost) - Confidence: High",
-    "[Minor]: Monitor drainage (low cost) - Confidence: Medium"
-  ]
+    "[Minor]: Verify soil with shallow borings (low cost) - Confidence: High"
+  ],
+  "verification_needed": ["Topographic survey near lakefront", "Soil type"]
 }}
 """
     try:
+        logging.debug(f"Slope Analysis Prompt: {prompt}")
         response = model.generate_content(prompt)
+        logging.debug(f"Slope Analysis Response: {response.text}")
         response_data = parse_gemini_json_response(response.text)
         return SlopeAnalysis(**response_data)
     except Exception as e:
@@ -168,8 +178,10 @@ def generate_feasibility_report(
     slope_analysis: Optional[SlopeAnalysis],
     location_analysis: Optional[LocationAnalysis],
     environmental_hazards: dict,
+    slope_data: SlopeData,
+    lake_proximity: bool
 ) -> Optional[FeasibilityReport]:
-    """Generate a comprehensive feasibility report for a property."""
+    """Generate a comprehensive feasibility report with integrated hazard analysis."""
     if model is None:
         logging.warning("Gemini model not initialized. Skipping feasibility report generation.")
         return None
@@ -191,57 +203,43 @@ def generate_feasibility_report(
     prompt = f"""
 {SYSTEM_PROMPT}
 
-TASK: Generate a comprehensive feasibility report for property at '{address}', explicitly integrating the provided environmental hazard layer information into the analysis and recommendations.
+TASK: Generate a comprehensive feasibility report for '{address}', integrating hazards and practical refinements.
 
 KEY DATA SUMMARY:
 - Address: {address}
-- Location Analysis: {'Completed' if location_analysis else 'Pending'}
-- Slope Analysis: {'Completed' if slope_analysis else 'Pending'}
-- Environmental Hazards: {json.dumps(environmental_hazards, indent=2)}
+- Location Analysis: {location_analysis.dict() if location_analysis else 'No data'}
+- Slope Analysis: {slope_analysis.dict() if slope_analysis else 'No data'}
+- Slope Data: Avg {slope_data.average_slope}°, Max {slope_data.max_slope}°, Avg Distance {slope_data.average_distance}m
+- Environmental Hazards: {json.dumps(environmental_hazards)}
+- Lake Proximity (within 100m of erosion hazard): {lake_proximity}
 
-INPUT DATA:
-- Location Analysis: {location_analysis.dict() if location_analysis else 'No location analysis available.'}
-- Slope Analysis: {slope_analysis.dict() if slope_analysis else 'No slope analysis available.'}
-- Hazard Layer Information: {json.dumps(hazard_layer_list, indent=2)}
-
-FEASIBILITY ASSESSMENT FRAMEWORK:
-- TECHNICAL FACTORS: Slope stability, soil conditions, drainage requirements
-- REGULATORY FACTORS: Compliance with MICC 19.07, setback requirements, environmental mitigation
-- ECONOMIC FACTORS: Relative costs compared to typical Mercer Island development
-- TIMELINE FACTORS: Permit process, seasonal construction limitations, specialist availability
-- ENVIRONMENTAL HAZARD FACTORS: Explicitly assess the impact of each hazard layer (erosion, potential slide, seismic, steep slope, watercourse) on feasibility, referencing their presence or absence in the summary and recommendations
-
-VISUAL INTEGRATION:
-- Reference map visuals in recommendations (e.g., 'Given the red seismic hazard zone on the map, consider...', 'Due to the orange steep slope area, implement...').
+FRAMEWORK:
+- Technical: Assess slope stability, soil, drainage only if data indicates risks (e.g., slope >15° or hazards present).
+- Regulatory: Reference MICC 19.07 only for relevant mitigations.
+- Practical: Sequence construction conservatively only if erosion or slope risks are present.
+- Hazards: Link recommendations to data; if no hazards and slope <5°, classify as Highly Feasible unless contradicted by soil or access issues.
 
 INSTRUCTIONS:
-- Base your assessment strictly on the provided analyses and hazard data.
-- If data is missing, use Mercer Island averages and state assumptions (e.g., 'Assuming typical soil conditions for the area').
-- Use only [Critical], [Major], or [Minor] as recommendation priorities.
-- Include confidence levels for each recommendation.
-- Provide an executive summary for non-technical stakeholders, followed by detailed technical recommendations.
-
-EXPECTED OUTPUT STRUCTURE:
+- Classify feasibility: Not Feasible (<30% success), Marginally Feasible (30-50%), Moderately Feasible (50-75%), Highly Feasible (>75%). Use Highly Feasible if slope <5° and no hazards unless contradicted by soil or access issues.
+- Suggest minimal foundations (e.g., shallow spread footings) for flat, hazard-free sites.
+- Output:
 ```json
 {{
-  "location_analysis": {{ 
-    "summary": "...", 
-    "recommendations": ["...", "..."] 
-  }},
-  "slope_analysis": {{ 
-    "summary": "...", 
-    "recommendations": ["...", "..."] 
-  }},
-  "overall_feasibility": "One of the four classifications: Not Feasible, Marginally Feasible, Moderately Feasible, Highly Feasible",
+  "location_analysis": {location_analysis.dict() if location_analysis else '{"summary": "Pending", "recommendations": [], "verification_needed": []}'},
+  "slope_analysis": {slope_analysis.dict() if slope_analysis else '{"summary": "Pending", "recommendations": [], "verification_needed": []}'},
+  "overall_feasibility": "Highly Feasible (>75% success)",
   "detailed_recommendations": [
-    "[Critical]: [First implementation step] (high cost) - Confidence: High",
-    "[Major]: [Second implementation step] (moderate cost) - Confidence: Medium"
+    "[Minor]: Use shallow spread footings for foundation (low cost) - Confidence: High",
+    "[Minor]: Verify soil bearing capacity with shallow borings (low cost) - Confidence: High"
   ],
-  "hazard_layers": {json.dumps(hazard_layer_list, indent=2)}
+  "hazard_layers": {json.dumps(hazard_layer_list)},
+  "verification_needed": ["Soil bearing capacity"]
 }}
 """
     try:
+        logging.debug(f"Feasibility Report Prompt: {prompt}")
         response = model.generate_content(prompt)
+        logging.debug(f"Feasibility Report Response: {response.text}")
         response_data = parse_gemini_json_response(response.text)
         return FeasibilityReport(**response_data)
     except Exception as e:
@@ -249,7 +247,7 @@ EXPECTED OUTPUT STRUCTURE:
         return None
 
 def chat_with_report(report: FeasibilityReport, user_query: str, chat_history: List[tuple]) -> Optional[str]:
-    """Respond to user queries about the feasibility report."""
+    """Respond to user queries about the feasibility report with adaptive tone."""
     if model is None:
         logging.warning("Gemini model not initialized. Skipping chat response.")
         return None
@@ -259,30 +257,25 @@ def chat_with_report(report: FeasibilityReport, user_query: str, chat_history: L
     prompt = f"""
 {SYSTEM_PROMPT}
 
-TASK: Respond to the user's question about their feasibility report.
+TASK: Respond to '{user_query}' about the feasibility report.
 
 FEASIBILITY REPORT:
-{json.dumps(report.dict(), indent=2)}
+{json.dumps(report.dict())}
 
-USER QUESTION:
-"{user_query}"
-
-CONVERSATION HISTORY:
+HISTORY:
 {history_str}
 
 INSTRUCTIONS:
-- Reference the feasibility report and previous questions to maintain consistency.
-- Use plain language first, then add technical terms with brief explanations (e.g., 'factor of safety' = stability measure).
-- If the question exceeds the report's scope, acknowledge the limitation and suggest additional information needed.
-- For regulatory questions, cite specific codes (e.g., "According to MICC 19.07.120...").
-- For cost questions, provide relative terms (low, moderate, high) without specific figures.
-- Include confidence levels where applicable (e.g., 'High confidence based on provided data').
-- If data is insufficient, state: 'Insufficient data—recommend further investigation.'
-- Encourage feedback by adding: 'If this response seems inaccurate, please flag it for review.'
-- Your response should be helpful, informative, and directly address the user's question in a professional but conversational tone.
+- Detect expertise: technical queries (e.g., 'What's FOS?') get detailed terms; layperson (e.g., 'Is it safe?') get plain language + terms explained.
+- Reference report specifics (e.g., 'Your 40° slope exceeds till repose').
+- Suggest practical next steps (e.g., 'Engage a geotech for borings').
+- Output plain text unless JSON requested: "Technical: Your slope's factor of safety (FOS, stability measure) may be <1.5 without piles—recommend 3 borings. Layperson: The steep hill might slide; get a soil test soon."
+- Add: 'If this response seems inaccurate, please flag it for review.'
 """
     try:
+        logging.debug(f"Chat Prompt: {prompt}")
         response = model.generate_content(prompt)
+        logging.debug(f"Chat Response: {response.text}")
         return response.text
     except Exception as e:
         logging.error(f"Error in chat_with_report: {e}")

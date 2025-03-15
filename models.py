@@ -29,6 +29,7 @@ class SlopeData(BaseModel):
     """Model for slope data extracted from contours."""
     average_slope: float = Field(..., description="Average slope in degrees")
     max_slope: float = Field(..., description="Maximum slope in degrees")
+    average_distance: float = Field(default=0.0, description="Average distance between contour intersections in meters")
 
 class EnvironmentalCheck(BaseModel):
     """Model for environmental hazard checks."""
@@ -42,16 +43,31 @@ class LocationAnalysis(BaseModel):
     """Model for Gemini location analysis output."""
     summary: str = Field(..., description="Summary of environmental risks")
     recommendations: List[str] = Field(..., description="List of mitigation recommendations")
+    verification_needed: List[str] = Field(
+        default_factory=list,
+        description="List of data points requiring further verification (e.g., soil type)"
+    )
 
 class SlopeAnalysis(BaseModel):
     """Model for Gemini slope analysis output."""
     summary: str = Field(..., description="Summary of slope stability")
     recommendations: List[str] = Field(..., description="List of slope-related recommendations")
+    verification_needed: List[str] = Field(
+        default_factory=list,
+        description="List of data points requiring further verification (e.g., groundwater level)"
+    )
 
 class FeasibilityReport(BaseModel):
     """Model for the final feasibility report."""
     location_analysis: LocationAnalysis = Field(..., description="Location analysis results")
     slope_analysis: SlopeAnalysis = Field(..., description="Slope analysis results")
-    overall_feasibility: str = Field(..., description="Overall feasibility assessment")
+    overall_feasibility: str = Field(..., description="Overall feasibility assessment (e.g., 'Marginally Feasible (40% success with mitigation)')")
     detailed_recommendations: List[str] = Field(..., description="Detailed recommendations for development")
-    hazard_layers: List[str] = Field(..., description="List of hazard layer statuses (e.g., 'Erosion Hazard: Present - Property falls within an Erosion Hazard')")
+    hazard_layers: List[str] = Field(
+        ...,
+        description="List of hazard layer statuses (e.g., 'Erosion Hazard: Present - Property falls within an Erosion Hazard')"
+    )
+    verification_needed: List[str] = Field(
+        default_factory=list,
+        description="List of data points requiring further verification across the entire report (e.g., soil profile)"
+    )

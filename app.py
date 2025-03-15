@@ -1,11 +1,13 @@
 import streamlit as st
 from models import Address, Coordinates, Property, SlopeData, EnvironmentalCheck, FeasibilityReport
-from geo_processing import geocode_address, extract_property, calculate_slope, check_environmental_hazards, create_map
+from geo_processing import geocode_address, extract_property, calculate_slope, check_environmental_hazards, create_map, HAZARD_FILES
 from gemini_analysis import analyze_location, analyze_slope, generate_feasibility_report, chat_with_report
 import numpy as np
 import logging
 import json
 import re
+from shapely.geometry import shape
+import geopandas as gpd
 
 # Configure logging to ensure INFO level logs are visible
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +52,7 @@ def perform_analysis(street: str, zip_code: str) -> None:
     if not slope_data:
         st.error("Failed to calculate slope data.")
         return
-    logging.info(f"Slope Data - Average: {slope_data.average_slope}, Max: {slope_data.max_slope}")
+    logging.info(f"Slope Data - Average: {slope_data.average_slope}, Max: {slope_data.max_slope}, Distance: {slope_data.average_distance}")
     st.session_state.slope_data = slope_data
 
     environmental_check = check_environmental_hazards(property)
@@ -59,45 +61,46 @@ def perform_analysis(street: str, zip_code: str) -> None:
         return
     st.session_state.environmental_check = environmental_check
 
+    # Calculate lake proximity for consistency
+    property_geom = shape(property.geometry)
+    property_geom_proj = gpd.GeoSeries([property_geom], crs="EPSG:4326").to_crs("EPSG:32610")[0]
+    erosion_gdf = gpd.read_file(HAZARD_FILES["erosion"]).to_crs("EPSG:32610")
+    lake_proximity = erosion_gdf.intersects(property_geom_proj.buffer(100)).any()
+
     with st.spinner("Performing location analysis..."):
         location_analysis = analyze_location(
             latitude=coordinates.latitude,
             longitude=coordinates.longitude,
-            address=address_str
+            address=address_str,
+            hazards=environmental_check.dict(),
+            lake_proximity=lake_proximity
         )
     st.session_state.location_analysis = location_analysis
 
     with st.spinner("Performing slope analysis..."):
-        avg_slope_deg = slope_data.average_slope if hasattr(slope_data, 'average_slope') else 0
-        avg_slope_percent = np.tan(np.radians(avg_slope_deg)) * 100
-        dist = 10.0  # Default distance in meters
-        elev_diff_m = (avg_slope_percent / 100) * dist
-        elev_diff_ft = elev_diff_m * 3.28084
+        elevation_diff = slope_data.average_slope * slope_data.average_distance / np.tan(np.radians(slope_data.average_slope)) if slope_data.average_slope > 0 else 0
         slope_analysis = analyze_slope(
-            slope=avg_slope_percent,
-            elevation_diff=elev_diff_ft,
-            distance=dist
+            slope=slope_data.average_slope,
+            elevation_diff=elevation_diff,
+            distance=slope_data.average_distance,
+            lake_proximity=lake_proximity
         )
     st.session_state.slope_analysis = slope_analysis
 
     with st.spinner("Generating feasibility report..."):
-        environmental_hazards = {
-            "erosion": environmental_check.erosion,
-            "potential_slide": environmental_check.potential_slide,
-            "seismic": environmental_check.seismic,
-            "steep_slope": environmental_check.steep_slope,
-            "watercourse": environmental_check.watercourse
-        }
+        environmental_hazards = environmental_check.dict()
         feasibility_report = generate_feasibility_report(
             address=address_str,
             slope_analysis=slope_analysis,
             location_analysis=location_analysis,
-            environmental_hazards=environmental_hazards
+            environmental_hazards=environmental_hazards,
+            slope_data=slope_data,
+            lake_proximity=lake_proximity
         )
     st.session_state.feasibility_report = feasibility_report
 
 def display_report():
-    """Display the feasibility report with styled sections and functional feedback buttons."""
+    """Display the feasibility report with styled sections, feedback buttons, and verification needs."""
     required_keys = ["coordinates", "property", "feasibility_report"]
     if not all(key in st.session_state and st.session_state[key] is not None for key in required_keys):
         st.info("No analysis results available yet. Please enter an address and click 'Analyze Property'.")
@@ -268,7 +271,22 @@ def display_report():
                 )
                 create_map(st.session_state.coordinates, st.session_state.property, GEOJSON_FILES)
 
+    # Display Overall Feasibility with UI Feedback
     st.markdown(f'<div class="feasibility-title">Overall Feasibility: {report.overall_feasibility}</div>', unsafe_allow_html=True)
+    
+    # Add UI feedback for potential feasibility mismatch
+    try:
+        if (report.overall_feasibility.startswith("Marginally") and 
+            hasattr(report, "slope_analysis") and report.slope_analysis and 
+            "flat" in report.slope_analysis.summary.lower() and 
+            hasattr(report, "hazard_layers") and report.hazard_layers and 
+            not any("Present" in h.split(":")[1].strip() for h in report.hazard_layers)):
+            st.warning(
+                "The 'Marginally Feasible' rating may be overly conservative given the flat slope and absence of hazards. "
+                "Consider verifying soil bearing capacity to confirm a higher feasibility rating (e.g., 'Highly Feasible')."
+            )
+    except AttributeError as e:
+        logging.error(f"Error checking feasibility mismatch: {e}")
 
     with st.expander("Hazard Layer Information", expanded=True):
         if hasattr(report, 'hazard_layers'):
@@ -362,6 +380,14 @@ def display_report():
         else:
             st.write("No detailed recommendations available.")
 
+    with st.expander("Verification Needed"):
+        if hasattr(report, 'verification_needed') and report.verification_needed:
+            st.write("**Additional Data Required:**")
+            for item in report.verification_needed:
+                st.markdown(f"- {item}")
+        else:
+            st.write("No additional verification required based on current data.")
+
 def main():
     st.title("Geotechnical Engineering Assistant - Mercer Island, WA")
 
@@ -431,19 +457,14 @@ def main():
                     )
 
                     # Assistant message
-                    # Log the raw response for debugging
                     logging.info(f"Raw chat response: {answer}")
-
-                    # Attempt to parse the response
                     try:
-                        # Remove the ```json ... ``` wrapper if present
                         json_match = re.match(r"```json\s*(.*?)\s*```", answer, re.DOTALL)
                         if json_match:
                             main_response = json_match.group(1).strip()
                         else:
                             main_response = answer
 
-                        # Extract the disclaimer and feedback request
                         disclaimer_pattern = r"(I’m limited to geotechnical analysis.*|If this response seems inaccurate, please flag it for review\.)"
                         disclaimer_match = re.search(disclaimer_pattern, main_response, re.DOTALL)
                         if disclaimer_match:
@@ -452,10 +473,7 @@ def main():
                         else:
                             disclaimer = ""
 
-                        # Clean the main response
                         response_clean = main_response.replace("Assistant: ", "").strip()
-
-                        # Parse the JSON content
                         response_dict = None
                         if response_clean.startswith("{") and response_clean.endswith("}"):
                             try:
@@ -464,56 +482,41 @@ def main():
                                 logging.warning(f"JSON parsing failed: {e}. Falling back to raw response.")
                                 response_dict = None
 
-                        # Start assistant message div
                         st.markdown('<div class="assistant-message">', unsafe_allow_html=True)
                         st.markdown('<strong>Assistant:</strong>', unsafe_allow_html=True)
 
                         if response_dict:
-                            # Handle "geotechnical_analysis" structure
                             if "geotechnical_analysis" in response_dict:
                                 geo_analysis = response_dict["geotechnical_analysis"]
-
-                                # Display subject
                                 if "subject" in geo_analysis:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Subject:</span> {geo_analysis["subject"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display analysis
                                 if "analysis" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Analysis:</span> {geo_analysis["analysis"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display liquefaction assessment
                                 if "liquefaction_assessment" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Liquefaction Assessment:</span> {geo_analysis["liquefaction_assessment"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display seismic design codes
                                 if "seismic_design_codes" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Seismic Design Codes:</span> {geo_analysis["seismic_design_codes"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display recommendations summary
                                 if "recommendations_summary" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations Summary:</span> {geo_analysis["recommendations_summary"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display recommendations
                                 if "recommendations" in geo_analysis:
                                     st.markdown('<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>', unsafe_allow_html=True)
                                     for rec in geo_analysis["recommendations"]:
-                                        # Parse the recommendation string
-                                        match = re.match(r"\[(.*?)\]:\s*(.*?)\s*\((.*?)\)\s*-\s*Confidence:\s*(.*?)$", rec)
+                                        match = re.match(r"$$   (.*?)   $$:\s*(.*?)\s*$$   (.*?)   $$\s*-\s*Confidence:\s*(.*?)$", rec)
                                         if match:
                                             priority = f"[{match.group(1)}]"
                                             description = match.group(2).strip()
@@ -524,7 +527,6 @@ def main():
                                             description = rec
                                             cost = "Unknown"
                                             confidence = "Unknown"
-
                                         st.markdown(
                                             f'<div class="chat-recommendation">'
                                             f'<div><span class="chat-field-label">Description:</span> {description}</div>'
@@ -534,45 +536,32 @@ def main():
                                             f'</div>',
                                             unsafe_allow_html=True
                                         )
-
-                                # Display limitations
                                 if "limitations" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Limitations:</span> {geo_analysis["limitations"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display additional information
                                 if "additional_information" in geo_analysis:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Information:</span> {geo_analysis["additional_information"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                            # Handle "foundation_recommendations" structure
                             elif "foundation_recommendations" in response_dict:
                                 rec_data = response_dict["foundation_recommendations"]
-
-                                # Display summary
                                 if "summary" in rec_data:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Summary:</span> {rec_data["summary"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display detailed explanation
                                 if "detailed_explanation" in rec_data:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Detailed Explanation:</span> {rec_data["detailed_explanation"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display recommendations
                                 if "recommendations" in rec_data:
                                     st.markdown('<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>', unsafe_allow_html=True)
                                     for rec in rec_data["recommendations"]:
-                                        # Parse the recommendation string
-                                        match = re.match(r"\[(.*?)\]:\s*(.*?)\s*\((.*?)\)\s*-\s*Confidence:\s*(.*?)$", rec)
+                                        match = re.match(r"$$   (.*?)   $$:\s*(.*?)\s*$$   (.*?)   $$\s*-\s*Confidence:\s*(.*?)$", rec)
                                         if match:
                                             priority = f"[{match.group(1)}]"
                                             description = match.group(2).strip()
@@ -583,7 +572,6 @@ def main():
                                             description = rec
                                             cost = "Unknown"
                                             confidence = "Unknown"
-
                                         st.markdown(
                                             f'<div class="chat-recommendation">'
                                             f'<div><span class="chat-field-label">Description:</span> {description}</div>'
@@ -593,26 +581,18 @@ def main():
                                             f'</div>',
                                             unsafe_allow_html=True
                                         )
-
-                                # Display additional considerations
                                 if "additional_considerations" in rec_data:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {rec_data["additional_considerations"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display confidence
                                 if "confidence" in rec_data:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Confidence:</span> {rec_data["confidence"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                            # Handle direct "response" field
                             elif "response" in response_dict:
                                 response_text = response_dict["response"]
-
-                                # Split the response into sections
                                 numbered_section = re.search(r"(\d+\.\s+\*\*.*?**:.*?(?=\n\d+\.|$|\n\n))", response_text, re.DOTALL)
                                 if numbered_section:
                                     considerations_start = numbered_section.start()
@@ -620,15 +600,11 @@ def main():
                                 else:
                                     considerations_start = len(response_text)
                                     intro_text = response_text.strip()
-
-                                # Extract introduction
                                 if intro_text:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Introduction:</span> {intro_text}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Extract numbered considerations
                                 if numbered_section:
                                     considerations_text = re.findall(r"(\d+\.\s+\*\*.*?**:.*?(?=\n\d+\.|$|\n\n))", response_text, re.DOTALL)
                                     if considerations_text:
@@ -642,12 +618,10 @@ def main():
                                                 f'<div>{consideration}</div>',
                                                 unsafe_allow_html=True
                                             )
-
-                                # Extract recommendations (lines starting with "1. **" with embedded "[Priority]")
                                 recommendations_section = re.search(r"\*\*Next Steps & Recommendations\*\*:(.*?)(?=\n\n[A-Z]|$)", response_text, re.DOTALL)
                                 if recommendations_section:
                                     rec_text = recommendations_section.group(1).strip()
-                                    recommendations = re.findall(r"\d+\.\s+\*\*.*?**.*?(\[.*?\]:\s*(.*?)\s*\((.*?)\)\s*-\s*Confidence:\s*(.*?))(?=\n\d+\.|$)", rec_text, re.DOTALL)
+                                    recommendations = re.findall(r"\d+\.\s+\*\*.*?**.*?($$   .*?   $$:\s*(.*?)\s*$$   (.*?)   $$\s*-\s*Confidence:\s*(.*?))(?=\n\d+\.|$)", rec_text, re.DOTALL)
                                     if recommendations:
                                         st.markdown(
                                             f'<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>',
@@ -655,7 +629,7 @@ def main():
                                         )
                                         for rec in recommendations:
                                             full_rec, description, cost, confidence = rec
-                                            priority_match = re.match(r"\[(.*?)\]:", full_rec)
+                                            priority_match = re.match(r"$$   (.*?)   $$:", full_rec)
                                             priority = priority_match.group(0) if priority_match else "Unknown"
                                             st.markdown(
                                                 f'<div class="chat-recommendation">'
@@ -666,8 +640,6 @@ def main():
                                                 f'</div>',
                                                 unsafe_allow_html=True
                                             )
-
-                                # Extract additional considerations
                                 if recommendations_section:
                                     addl_start = recommendations_section.end()
                                     addl_text = response_text[addl_start:].strip()
@@ -676,25 +648,19 @@ def main():
                                             f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {addl_text}</div>',
                                             unsafe_allow_html=True
                                         )
-
-                            # Handle "geotechnical_assessment" structure
                             elif "geotechnical_assessment" in response_dict:
                                 assessment = response_dict["geotechnical_assessment"]
-
-                                # Display foundation recommendation explanation
                                 if "foundation_recommendation_explanation" in assessment:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Explanation:</span> {assessment["foundation_recommendation_explanation"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display technical details
                                 if "technical_details" in assessment:
                                     tech_details = assessment["technical_details"]
                                     st.markdown('<div style="margin-top: 8px;"><span class="chat-field-label">Technical Details:</span></div>', unsafe_allow_html=True)
                                     for key, value in tech_details.items():
                                         if key == "recommendation_priority":
-                                            match = re.match(r"\[(.*?)\]:\s*(.*?)\s*\((.*?)\)\s*-\s*Confidence:\s*(.*?)$", value)
+                                            match = re.match(r"$$   (.*?)   $$:\s*(.*?)\s*$$   (.*?)   $$\s*-\s*Confidence:\s*(.*?)$", value)
                                             if match:
                                                 priority = f"[{match.group(1)}]"
                                                 description = match.group(2).strip()
@@ -705,7 +671,6 @@ def main():
                                                 description = value
                                                 cost = "Unknown"
                                                 confidence = "Unknown"
-
                                             st.markdown(
                                                 f'<div class="chat-recommendation">'
                                                 f'<div><span class="chat-field-label">Description:</span> {description}</div>'
@@ -720,38 +685,28 @@ def main():
                                                 f'<div><span class="chat-field-label">{key.replace("_", " ").title()}:</span> {value}</div>',
                                                 unsafe_allow_html=True
                                             )
-
-                                # Display additional considerations
                                 if "additional_considerations" in assessment:
                                     st.markdown(
                                         f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {assessment["additional_considerations"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
-                                # Display confidence level
                                 if "confidence_level" in assessment:
                                     st.markdown(
                                         f'<div><span class="chat-field-label">Confidence Level:</span> {assessment["confidence_level"]}</div>',
                                         unsafe_allow_html=True
                                     )
-
                         else:
-                            # Fallback: display the raw response if not JSON
                             st.markdown(
                                 f'<div>{response_clean}</div>',
                                 unsafe_allow_html=True
                             )
 
-                        # Close assistant message div
                         st.markdown('</div>', unsafe_allow_html=True)
-
-                        # Display disclaimer if present
                         if disclaimer:
                             st.markdown(
                                 f'<div class="chat-disclaimer">{disclaimer}</div>',
                                 unsafe_allow_html=True
                             )
-
                     except Exception as e:
                         logging.error(f"Error parsing chat response: {e}")
                         st.markdown(
@@ -759,7 +714,6 @@ def main():
                             unsafe_allow_html=True
                         )
 
-                    # Add "Flag This" button
                     if st.button("Flag This", key=f"chat_{idx}_{question[:50]}"):
                         log_feedback(question, answer, "User flagged as inconsistent")
                         st.success("Feedback logged.")
