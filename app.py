@@ -500,266 +500,41 @@ def main():
                             main_response = json_match.group(1).strip()
                         else:
                             main_response = answer
-
-                        disclaimer_pattern = r"(I’m limited to geotechnical analysis.*|If this response seems inaccurate, please flag it for review\.)"
-                        disclaimer_match = re.search(disclaimer_pattern, main_response, re.DOTALL)
-                        if disclaimer_match:
-                            disclaimer = disclaimer_match.group(0).strip()
-                            main_response = main_response[: disclaimer_match.start()].strip()
-                        else:
-                            disclaimer = ""
-
-                        response_clean = main_response.replace("Assistant: ", "").strip()
-                        response_dict = None
-                        if response_clean.startswith("{") and response_clean.endswith("}"):
-                            try:
-                                response_dict = json.loads(response_clean)
-                            except json.JSONDecodeError as e:
-                                logging.warning(f"JSON parsing failed: {e}. Falling back to raw response.")
-                                response_dict = None
-
+                        response_dict = json.loads(main_response)
                         st.markdown('<div class="assistant-message">', unsafe_allow_html=True)
                         st.markdown("<strong>Assistant:</strong>", unsafe_allow_html=True)
 
-                        if response_dict:
-                            if "geotechnical_analysis" in response_dict:
-                                geo_analysis = response_dict["geotechnical_analysis"]
-                                if "subject" in geo_analysis:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Subject:</span> {geo_analysis["subject"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "analysis" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Analysis:</span> {geo_analysis["analysis"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "liquefaction_assessment" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Liquefaction Assessment:</span> {geo_analysis["liquefaction_assessment"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "seismic_design_codes" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Seismic Design Codes:</span> {geo_analysis["seismic_design_codes"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "recommendations_summary" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations Summary:</span> {geo_analysis["recommendations_summary"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "recommendations" in geo_analysis:
-                                    st.markdown(
-                                        '<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                    for rec in geo_analysis["recommendations"]:
-                                        match = re.match(
-                                            r"$$     (.*?)     $$:\s*(.*?)\s*$$     (.*?)     $$\s*-\s*Confidence:\s*(.*?)$", rec
-                                        )
-                                        if match:
-                                            priority = f"[{match.group(1)}]"
-                                            description = match.group(2).strip()
-                                            cost = match.group(3).strip()
-                                            confidence = match.group(4).strip()
-                                        else:
-                                            priority = "Unknown"
-                                            description = rec
-                                            cost = "Unknown"
-                                            confidence = "Unknown"
-                                        st.markdown(
-                                            f'<div class="chat-recommendation">'
-                                            f'<div><span class="chat-field-label">Description:</span> {description}</div>'
-                                            f'<div><span class="chat-field-label">Priority:</span> <span class="priority-label">{priority}</span></div>'
-                                            f'<div><span class="chat-field-label">Cost:</span> {cost}</div>'
-                                            f'<div><span class="chat-field-label">Confidence:</span> <span class="confidence-level">{confidence}</span></div>'
-                                            f'</div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                if "limitations" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Limitations:</span> {geo_analysis["limitations"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "additional_information" in geo_analysis:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Information:</span> {geo_analysis["additional_information"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                            elif "foundation_recommendations" in response_dict:
-                                rec_data = response_dict["foundation_recommendations"]
-                                if "summary" in rec_data:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Summary:</span> {rec_data["summary"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "detailed_explanation" in rec_data:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Detailed Explanation:</span> {rec_data["detailed_explanation"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "recommendations" in rec_data:
-                                    st.markdown(
-                                        '<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                    for rec in rec_data["recommendations"]:
-                                        match = re.match(
-                                            r"$$     (.*?)     $$:\s*(.*?)\s*$$     (.*?)     $$\s*-\s*Confidence:\s*(.*?)$", rec
-                                        )
-                                        if match:
-                                            priority = f"[{match.group(1)}]"
-                                            description = match.group(2).strip()
-                                            cost = match.group(3).strip()
-                                            confidence = match.group(4).strip()
-                                        else:
-                                            priority = "Unknown"
-                                            description = rec
-                                            cost = "Unknown"
-                                            confidence = "Unknown"
-                                        st.markdown(
-                                            f'<div class="chat-recommendation">'
-                                            f'<div><span class="chat-field-label">Description:</span> {description}</div>'
-                                            f'<div><span class="chat-field-label">Priority:</span> <span class="priority-label">{priority}</span></div>'
-                                            f'<div><span class="chat-field-label">Cost:</span> {cost}</div>'
-                                            f'<div><span class="chat-field-label">Confidence:</span> <span class="confidence-level">{confidence}</span></div>'
-                                            f'</div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                if "additional_considerations" in rec_data:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {rec_data["additional_considerations"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "confidence" in rec_data:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Confidence:</span> {rec_data["confidence"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                            elif "response" in response_dict:
-                                response_text = response_dict["response"]
-                                numbered_section = re.search(
-                                    r"(\d+\.\s+\*\*.*?**:.*?(?=\n\d+\.|$|\n\n))", response_text, re.DOTALL
+                        if "response" in response_dict:
+                            resp = response_dict["response"]
+                            # Display introduction
+                            if "introduction" in resp:
+                                st.markdown(
+                                    f'<div><span class="chat-field-label">Introduction:</span> {resp["introduction"]}</div>',
+                                    unsafe_allow_html=True,
                                 )
-                                if numbered_section:
-                                    considerations_start = numbered_section.start()
-                                    intro_text = response_text[:considerations_start].strip()
-                                else:
-                                    considerations_start = len(response_text)
-                                    intro_text = response_text.strip()
-                                if intro_text:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Introduction:</span> {intro_text}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if numbered_section:
-                                    considerations_text = re.findall(
-                                        r"(\d+\.\s+\*\*.*?**:.*?(?=\n\d+\.|$|\n\n))", response_text, re.DOTALL
-                                    )
-                                    if considerations_text:
-                                        st.markdown(
-                                            f'<div style="margin-top: 8px;"><span class="chat-field-label">Considerations:</span></div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                        for consideration in considerations_text:
-                                            consideration = consideration.strip()
-                                            st.markdown(f"<div>{consideration}</div>", unsafe_allow_html=True)
-                                recommendations_section = re.search(
-                                    r"\*\*Next Steps & Recommendations\*\*:(.*?)(?=\n\n[A-Z]|$)", response_text, re.DOTALL
+                            # Display sections
+                            if "sections" in resp:
+                                for section in resp["sections"]:
+                                    st.markdown('<div class="chat-recommendation">', unsafe_allow_html=True)
+                                    for key in ["title", "rationale", "recommendation", "plain_language", "next_steps"]:
+                                        if key in section:
+                                            st.markdown(
+                                                f'<div><span class="chat-field-label">{key.title()}:</span> {section[key]}</div>',
+                                                unsafe_allow_html=True,
+                                            )
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                            # Display verification needs
+                            if "verification_needs" in resp:
+                                st.markdown(
+                                    '<div style="margin-top: 8px;"><span class="chat-field-label">Verification Needs:</span></div>',
+                                    unsafe_allow_html=True,
                                 )
-                                if recommendations_section:
-                                    rec_text = recommendations_section.group(1).strip()
-                                    recommendations = re.findall(
-                                        r"\d+\.\s+\*\*.*?**.*?($$     .*?     $$:\s*(.*?)\s*$$     (.*?)     $$\s*-\s*Confidence:\s*(.*?))(?=\n\d+\.|$)",
-                                        rec_text,
-                                        re.DOTALL,
-                                    )
-                                    if recommendations:
-                                        st.markdown(
-                                            f'<div style="margin-top: 8px;"><span class="chat-field-label">Recommendations:</span></div>',
-                                            unsafe_allow_html=True,
-                                        )
-                                        for rec in recommendations:
-                                            full_rec, description, cost, confidence = rec
-                                            priority_match = re.match(r"$$     (.*?)     $$:", full_rec)
-                                            priority = priority_match.group(0) if priority_match else "Unknown"
-                                            st.markdown(
-                                                f'<div class="chat-recommendation">'
-                                                f'<div><span class="chat-field-label">Description:</span> {description}</div>'
-                                                f'<div><span class="chat-field-label">Priority:</span> <span class="priority-label">{priority}</span></div>'
-                                                f'<div><span class="chat-field-label">Cost:</span> {cost}</div>'
-                                                f'<div><span class="chat-field-label">Confidence:</span> <span class="confidence-level">{confidence}</span></div>'
-                                                f'</div>',
-                                                unsafe_allow_html=True,
-                                            )
-                                if recommendations_section:
-                                    addl_start = recommendations_section.end()
-                                    addl_text = response_text[addl_start:].strip()
-                                    if addl_text and addl_text not in disclaimer:
-                                        st.markdown(
-                                            f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {addl_text}</div>',
-                                            unsafe_allow_html=True,
-                                        )
-                            elif "geotechnical_assessment" in response_dict:
-                                assessment = response_dict["geotechnical_assessment"]
-                                if "foundation_recommendation_explanation" in assessment:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Explanation:</span> {assessment["foundation_recommendation_explanation"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "technical_details" in assessment:
-                                    tech_details = assessment["technical_details"]
-                                    st.markdown(
-                                        '<div style="margin-top: 8px;"><span class="chat-field-label">Technical Details:</span></div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                    for key, value in tech_details.items():
-                                        if key == "recommendation_priority":
-                                            match = re.match(
-                                                r"$$     (.*?)     $$:\s*(.*?)\s*$$     (.*?)     $$\s*-\s*Confidence:\s*(.*?)$",
-                                                value,
-                                            )
-                                            if match:
-                                                priority = f"[{match.group(1)}]"
-                                                description = match.group(2).strip()
-                                                cost = match.group(3).strip()
-                                                confidence = match.group(4).strip()
-                                            else:
-                                                priority = "Unknown"
-                                                description = value
-                                                cost = "Unknown"
-                                                confidence = "Unknown"
-                                            st.markdown(
-                                                f'<div class="chat-recommendation">'
-                                                f'<div><span class="chat-field-label">Description:</span> {description}</div>'
-                                                f'<div><span class="chat-field-label">Priority:</span> <span class="priority-label">{priority}</span></div>'
-                                                f'<div><span class="chat-field-label">Cost:</span> {cost}</div>'
-                                                f'<div><span class="chat-field-label">Confidence:</span> <span class="confidence-level">{confidence}</span></div>'
-                                                f'</div>',
-                                                unsafe_allow_html=True,
-                                            )
-                                        else:
-                                            st.markdown(
-                                                f'<div><span class="chat-field-label">{key.replace("_", " ").title()}:</span> {value}</div>',
-                                                unsafe_allow_html=True,
-                                            )
-                                if "additional_considerations" in assessment:
-                                    st.markdown(
-                                        f'<div style="margin-top: 8px;"><span class="chat-field-label">Additional Considerations:</span> {assessment["additional_considerations"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                if "confidence_level" in assessment:
-                                    st.markdown(
-                                        f'<div><span class="chat-field-label">Confidence Level:</span> {assessment["confidence_level"]}</div>',
-                                        unsafe_allow_html=True,
-                                    )
+                                for need in resp["verification_needs"]:
+                                    st.markdown(f'<div>{need}</div>', unsafe_allow_html=True)
                         else:
-                            st.markdown(f"<div>{response_clean}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div>{main_response}</div>", unsafe_allow_html=True)
 
                         st.markdown("</div>", unsafe_allow_html=True)
-                        if disclaimer:
-                            st.markdown(f'<div class="chat-disclaimer">{disclaimer}</div>', unsafe_allow_html=True)
                     except Exception as e:
                         logging.error(f"Error parsing chat response: {e}")
                         st.markdown(
