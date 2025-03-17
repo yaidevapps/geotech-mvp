@@ -417,7 +417,7 @@ def display_report():
             st.write("No additional verification required based on current data.")
 
 def main():
-    st.title("Geotechnical Engineering Assistant - Mercer Island, WA")
+    st.title("Geotechnical Engineering Feasibility Assistant - Mercer Island, WA")
 
     # Initialize session state variables if they don’t exist
     session_state_vars = [
