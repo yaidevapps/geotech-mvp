@@ -233,7 +233,7 @@ Regulatory: Reference MICC 19.07 only for relevant mitigations.
 Practical: Sequence construction conservatively only if erosion or slope risks are present.
 Hazards: Link recommendations to data; if no hazards and slope <5°, classify as Highly Feasible unless contradicted by soil or access issues.
 INSTRUCTIONS:
-- Classify feasibility: Not Feasible (<30% success), Marginally Feasible (30-50%), Moderately Feasible (50-75%), Highly Feasible (>75%). Base primarily on mapped hazards (erosion, slide, seismic, steep_slope, watercourse). Consider calculated slope (>25°) as a secondary factor only if it aligns with a mapped hazard or verified data; otherwise, flag for verification without lowering feasibility solely on slope.
+- Classify feasibility: Marginally Feasible (<50% success), Moderately Feasible (50-75%), Highly Feasible (>75%). Base primarily on mapped hazards (erosion, slide, seismic, steep_slope, watercourse). Consider calculated slope (>25°) as a secondary factor only if it aligns with a mapped hazard or verified data; otherwise, flag for verification without lowering feasibility solely on slope.
 - Suggest minimal foundations (e.g., shallow spread footings) for flat, hazard-free sites.
 - Hazard Layers must reflect ONLY the Environmental Hazards data. DO NOT mark 'Steep Slope Hazard' as 'Present' based on calculated slope angles exceeding 25°—use verification_needed for such discrepancies.
 - Assign confidence: High (mapped hazards or verified data), Medium (assumptions like glacial till), Low (speculative).
