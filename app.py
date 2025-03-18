@@ -22,7 +22,16 @@ GEOJSON_FILES = {
     "Seismic Hazard": "data/Mercer_Island_Environmental_Layers_Seismic.geojson",
     "Steep Slope Hazard": "data/Mercer_Island_Environmental_Layers_SteepSlope.geojson",
     "Watercourse Buffer": "data/Mercer_Island_Environmental_Layers_WatercourseBufferSetback.geojson",
+    "Shoreline": "data/Mercer_Island_Lake_Washington_Shoreline_Full.geojson",  # Updated
 }
+
+# Cache the shoreline GeoDataFrame at startup to improve performance
+try:
+    SHORELINE_GDF = gpd.read_file(GEOJSON_FILES["Shoreline"]).to_crs("EPSG:32610")
+    logging.info("Shoreline GeoDataFrame loaded and cached successfully.")
+except Exception as e:
+    logging.error(f"Failed to load Shoreline GeoDataFrame: {e}")
+    SHORELINE_GDF = None
 
 def log_feedback(user_input: str, model_output: str, feedback: str):
     """Log user feedback to a file for review."""
@@ -66,11 +75,18 @@ def perform_analysis(street: str, zip_code: str) -> None:
         return
     st.session_state.environmental_check = environmental_check
 
-    # Calculate lake proximity for consistency
+    # Calculate lake proximity using the cached SHORELINE_GDF
     property_geom = shape(property_data.geometry)
     property_geom_proj = gpd.GeoSeries([property_geom], crs="EPSG:4326").to_crs("EPSG:32610")[0]
-    erosion_gdf = gpd.read_file(HAZARD_FILES["erosion"]).to_crs("EPSG:32610")
-    lake_proximity = erosion_gdf.intersects(property_geom_proj.buffer(100)).any()
+    if SHORELINE_GDF is not None:
+        distance_to_shoreline = SHORELINE_GDF.distance(property_geom_proj).min()
+        logging.debug(f"Distance to shoreline: {distance_to_shoreline:.2f}m")
+        lake_proximity = distance_to_shoreline <= 100  # Distance in meters
+        st.session_state.lake_proximity_distance = distance_to_shoreline  # Store for display
+    else:
+        logging.error("Shoreline GeoDataFrame not available for lake proximity calculation.")
+        lake_proximity = False
+        st.session_state.lake_proximity_distance = None
 
     with st.spinner("Performing location analysis..."):
         location_analysis = analyze_location(
@@ -111,6 +127,7 @@ def perform_analysis(street: str, zip_code: str) -> None:
         )
     st.session_state.feasibility_report = feasibility_report
 
+# The rest of your app.py remains unchanged
 def display_report():
     """Display the feasibility report with styled sections, feedback buttons, and verification needs."""
     required_keys = ["coordinates", "property", "feasibility_report"]
@@ -323,6 +340,20 @@ def display_report():
                 )
         else:
             st.write("Hazard layer information unavailable.")
+
+    # Add Lake Proximity Information
+    with st.expander("Lake Proximity Information"):
+        if "lake_proximity_distance" in st.session_state:
+            distance = st.session_state.lake_proximity_distance
+            is_near = distance <= 100
+            st.markdown(
+                f'<div class="{"hazard-present" if is_near else "hazard-absent"}">'
+                f'<span class="{"status-dot-present" if is_near else "status-dot-absent"}"></span>'
+                f"Lake Proximity: {'Within 100m' if is_near else 'Beyond 100m'} - Distance to shoreline: {distance:.1f} meters</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.write("Lake proximity data unavailable.")
 
     with st.expander("Location Analysis"):
         st.write(

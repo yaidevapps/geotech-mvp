@@ -172,6 +172,7 @@ def create_map(coordinates: Coordinates, property: Property, geojson_files: dict
             "Seismic Hazard": {"fillColor": "pink", "color": "pink", "weight": 1, "fillOpacity": 0.3},
             "Steep Slope Hazard": {"fillColor": "orange", "color": "orange", "weight": 1, "fillOpacity": 0.3},
             "Watercourse Buffer": {"fillColor": "lightblue", "color": "lightblue", "weight": 1, "fillOpacity": 0.4},
+            "Shoreline": {"color": "darkblue", "weight": 2, "fill": False},  # Added
         }
 
         for layer_name, file_path in geojson_files.items():
